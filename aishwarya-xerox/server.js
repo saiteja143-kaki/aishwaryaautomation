@@ -344,7 +344,9 @@ app.post('/api/order/create', async (req, res) => {
       nIn1: options.nIn1
     });
 
-    const orderId = `AX-${String(orderCounter++).padStart(3, '0')}`;
+    // Generate a unique order ID that never collides with past PhonePe transactions
+    const uniqueSuffix = Date.now().toString(36).slice(-4).toUpperCase();
+    const orderId = `AX-${uniqueSuffix}-${String(orderCounter++).padStart(3, '0')}`;
     sessionManager.bindOrder(sessionId, orderId);
 
     // Build UPI Payment URL

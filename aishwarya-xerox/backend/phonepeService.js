@@ -161,7 +161,7 @@ export class PhonePeService {
         });
 
         const data = await response.json();
-        console.log(`[PhonePe V2 Response]`, data.state, data.redirectUrl ? 'received redirectUrl' : '');
+        console.log(`[PhonePe V2 Response]`, data.state || data.code, data.redirectUrl ? 'received redirectUrl' : JSON.stringify(data));
 
         if (data.redirectUrl) {
           return {
@@ -172,6 +172,14 @@ export class PhonePeService {
             orderId: data.orderId,
             merchantOrderId: orderId,
             amountInPaise
+          };
+        } else {
+          console.warn(`[PhonePe V2 Error]`, data.code, data.message);
+          return {
+            success: false,
+            error: data.message || 'PhonePe payment checkout failed',
+            code: data.code || 'V2_ERROR',
+            details: data
           };
         }
       } catch (err) {
