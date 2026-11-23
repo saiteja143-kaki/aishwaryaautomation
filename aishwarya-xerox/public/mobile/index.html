@@ -8,6 +8,8 @@
   <script src="/socket.io/socket.io.js"></script>
   <!-- Official PhonePe Standard Checkout Web SDK -->
   <script src="https://mercury.phonepe.com/web/checkout/v1/checkout.js"></script>
+  <!-- HTML5 In-Browser Camera QR Scanner SDK -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
@@ -42,17 +44,89 @@
     </div>
   </header>
 
+  <!-- FULLSCREEN CAMERA QR SCANNER MODAL -->
+  <div id="scannerModal" class="hidden fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-md flex flex-col justify-between p-4 transition-all duration-300">
+    <!-- Top Bar -->
+    <div class="max-w-md mx-auto w-full flex items-center justify-between text-white py-2">
+      <div class="flex items-center gap-2">
+        <span class="w-8 h-8 rounded-lg bg-amber-500 text-slate-950 font-black flex items-center justify-center text-xs">AX</span>
+        <span class="font-bold text-sm">Scan Outside Kiosk QR</span>
+      </div>
+      <button onclick="closeCameraScanner()" class="w-9 h-9 rounded-full bg-white/20 hover:bg-white/30 text-white font-bold text-sm flex items-center justify-center active:scale-95 transition">
+        ✕
+      </button>
+    </div>
+
+    <!-- Viewfinder Area -->
+    <div class="max-w-md mx-auto w-full flex-grow flex flex-col items-center justify-center my-auto">
+      <div class="relative w-full aspect-square max-w-[280px] rounded-3xl overflow-hidden border-2 border-amber-400 shadow-2xl bg-black">
+        <!-- Live Video Scanner Canvas -->
+        <div id="qrReader" class="w-full h-full"></div>
+
+        <!-- Scanning Framing Overlay -->
+        <div class="absolute inset-0 pointer-events-none flex flex-col justify-between p-5">
+          <div class="flex justify-between">
+            <div class="w-6 h-6 border-t-4 border-l-4 border-amber-400 rounded-tl-lg"></div>
+            <div class="w-6 h-6 border-t-4 border-r-4 border-amber-400 rounded-tr-lg"></div>
+          </div>
+          <!-- Animated Laser Scan Line -->
+          <div class="w-full h-0.5 bg-gradient-to-r from-transparent via-amber-400 to-transparent animate-pulse shadow-lg shadow-amber-400"></div>
+          <div class="flex justify-between">
+            <div class="w-6 h-6 border-b-4 border-l-4 border-amber-400 rounded-bl-lg"></div>
+            <div class="w-6 h-6 border-b-4 border-r-4 border-amber-400 rounded-br-lg"></div>
+          </div>
+        </div>
+      </div>
+
+      <p class="text-white/80 text-xs text-center mt-4 max-w-xs font-medium">
+        Point your camera at the dynamic QR code displayed on the screen outside Aishwarya Xerox
+      </p>
+    </div>
+
+    <!-- Bottom Actions -->
+    <div class="max-w-md mx-auto w-full text-center pb-4">
+      <button onclick="closeCameraScanner()" class="px-6 py-2.5 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded-xl border border-white/20 active:scale-95 transition">
+        Cancel
+      </button>
+    </div>
+  </div>
+
   <!-- Container -->
   <main class="max-w-md mx-auto w-full p-4 flex-grow space-y-4">
 
-    <!-- BUSY / EXPIRED SCREEN -->
+    <!-- BUSY / EXPIRED / SCAN QR NOTICE VIEW -->
     <div id="noticeView" class="hidden bg-white p-6 rounded-3xl shadow-sm border border-slate-200 text-center space-y-4 my-8">
       <div id="noticeIcon" class="w-20 h-20 mx-auto rounded-full bg-amber-100 text-amber-600 flex items-center justify-center text-4xl">
         ⏳
       </div>
-      <h2 id="noticeTitle" class="text-2xl font-black text-slate-900">Kiosk is in Use</h2>
-      <p id="noticeDesc" class="text-sm text-slate-600">Another customer is currently printing at Aishwarya Xerox. Please wait ~1-2 minutes for your turn.</p>
-      <div id="noticeAction" class="pt-2">
+      <h2 id="noticeTitle" class="text-2xl font-black text-slate-900">Scan QR to Start</h2>
+      <p id="noticeDesc" class="text-sm text-slate-600">Please scan the dynamic QR code displayed on the screen outside Aishwarya Xerox to start printing.</p>
+
+      <!-- Primary Camera Scan Action (Shown when prompt is Scan QR) -->
+      <div id="cameraActionBlock" class="pt-2 space-y-3">
+        <button type="button" onclick="openCameraScanner()" class="w-full py-4 bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-300 hover:from-amber-600 hover:to-yellow-400 text-slate-950 font-black rounded-2xl shadow-lg shadow-amber-500/25 active:scale-95 transition flex items-center justify-center gap-2.5 text-base">
+          <span class="text-xl">📷</span>
+          <span>Open Camera & Scan QR</span>
+        </button>
+
+        <!-- Manual 6-character Code Fallback -->
+        <div class="pt-2 border-t border-slate-100">
+          <details class="text-xs text-slate-500">
+            <summary class="cursor-pointer font-bold hover:text-slate-800 select-none py-1">
+              ⌨️ Or enter code shown below QR on screen
+            </summary>
+            <div class="mt-2.5 flex gap-2">
+              <input type="text" id="manualTokenInput" placeholder="e.g. AX-RGIENV" class="flex-grow bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2 text-xs font-bold uppercase text-slate-900 placeholder-slate-400 focus:outline-none focus:border-slate-800">
+              <button onclick="submitManualToken()" class="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl active:scale-95 transition">
+                Start
+              </button>
+            </div>
+          </details>
+        </div>
+      </div>
+
+      <!-- Secondary Action (Reload / Check Again when Busy) -->
+      <div id="noticeAction" class="hidden pt-2">
         <a href="javascript:void(0)" onclick="window.location.reload()" class="inline-block w-full py-3 bg-slate-900 text-white font-bold rounded-2xl shadow-md active:scale-95 transition text-sm">
           Check Again
         </a>
@@ -531,17 +605,150 @@
         }
       }
 
-      // If no token in URL and no active session, prompt user to scan QR
+      // If no token in URL and no active session, prompt user to scan QR with camera
       if (!token) {
         showNotice({
           icon: '📷',
           title: 'Scan QR to Start',
           desc: 'Please scan the dynamic QR code displayed on the screen outside Aishwarya Xerox to start printing.',
-          actionText: null
+          actionText: null,
+          showCamera: true
         });
         return;
       }
 
+      // Claim session with URL token
+      claimSessionWithToken(token);
+    }
+
+    function showNotice({ icon, title, desc, actionText, showCamera = false }) {
+      document.getElementById('orderFlowView').classList.add('hidden');
+      const notice = document.getElementById('noticeView');
+      notice.classList.remove('hidden');
+
+      document.getElementById('noticeIcon').textContent = icon;
+      document.getElementById('noticeTitle').textContent = title;
+      document.getElementById('noticeDesc').textContent = desc;
+
+      const cameraBlock = document.getElementById('cameraActionBlock');
+      if (cameraBlock) {
+        if (showCamera) {
+          cameraBlock.classList.remove('hidden');
+        } else {
+          cameraBlock.classList.add('hidden');
+        }
+      }
+
+      const action = document.getElementById('noticeAction');
+      if (actionText) {
+        action.classList.remove('hidden');
+        action.querySelector('a').textContent = actionText;
+      } else {
+        action.classList.add('hidden');
+      }
+    }
+
+    // ==========================================
+    // HTML5 IN-BROWSER CAMERA QR SCANNER
+    // ==========================================
+    let html5QrScannerInstance = null;
+
+    async function openCameraScanner() {
+      const modal = document.getElementById('scannerModal');
+      modal.classList.remove('hidden');
+
+      if (!window.Html5Qrcode) {
+        alert('Camera scanner is initializing. Please tap again in a moment.');
+        return;
+      }
+
+      try {
+        if (!html5QrScannerInstance) {
+          html5QrScannerInstance = new Html5Qrcode("qrReader");
+        }
+
+        const scanConfig = {
+          fps: 15,
+          qrbox: { width: 240, height: 240 },
+          aspectRatio: 1.0
+        };
+
+        await html5QrScannerInstance.start(
+          { facingMode: "environment" },
+          scanConfig,
+          (decodedText) => {
+            console.log('[QR Code Scanned]', decodedText);
+            if (navigator.vibrate) navigator.vibrate(100);
+            closeCameraScanner();
+            handleScannedResult(decodedText);
+          },
+          (errorMessage) => {
+            // Scanning live video frame...
+          }
+        );
+      } catch (err) {
+        console.error('Camera start error:', err);
+        alert('Could not start camera. Please ensure camera permission is granted in your browser settings, or enter the code manually.');
+        closeCameraScanner();
+      }
+    }
+
+    async function closeCameraScanner() {
+      const modal = document.getElementById('scannerModal');
+      modal.classList.add('hidden');
+
+      if (html5QrScannerInstance) {
+        try {
+          if (html5QrScannerInstance.isScanning) {
+            await html5QrScannerInstance.stop();
+          }
+        } catch (e) {
+          console.warn('Camera stop error:', e);
+        }
+      }
+    }
+
+    // Extract token from full kiosk URL or plain text
+    function extractToken(str) {
+      if (!str) return '';
+      str = str.trim();
+      try {
+        if (str.startsWith('http://') || str.startsWith('https://')) {
+          const u = new URL(str);
+          return u.searchParams.get('token') || str;
+        }
+      } catch (e) {}
+
+      if (str.includes('token=')) {
+        return str.split('token=')[1].split('&')[0];
+      }
+      return str;
+    }
+
+    // Process scanned QR code
+    function handleScannedResult(rawString) {
+      const token = extractToken(rawString);
+      if (!token) {
+        alert('Invalid QR code format. Please scan the QR code displayed on the screen outside Aishwarya Xerox.');
+        return;
+      }
+      claimSessionWithToken(token);
+    }
+
+    // Manual token entry
+    function submitManualToken() {
+      const input = document.getElementById('manualTokenInput');
+      const val = input.value.trim().toUpperCase();
+      if (!val) {
+        alert('Please enter the code shown on the outside screen (e.g. AX-RGIENV).');
+        input.focus();
+        return;
+      }
+      claimSessionWithToken(val);
+    }
+
+    // Claim session and enter ordering flow
+    async function claimSessionWithToken(token) {
       try {
         const res = await fetch('/api/session/start', {
           method: 'POST',
@@ -566,10 +773,10 @@
             showNotice({
               icon: '🚫',
               title: 'QR Code Expired / Used',
-              desc: 'This single-use QR code has already been completed. For security, each QR code works only once. Please scan the fresh QR code on the outside screen to print another document.',
-              actionText: null
+              desc: 'This single-use QR code has already been completed or expired. Please scan the fresh QR code on the outside screen to start a new print.',
+              actionText: null,
+              showCamera: true
             });
-            // Clear expired token from address bar so reload won't keep hitting it
             window.history.replaceState({}, document.title, window.location.pathname);
           } else {
             // Kiosk busy
@@ -577,32 +784,14 @@
               icon: '⏳',
               title: 'Kiosk is in Use',
               desc: 'Another customer is currently printing at Aishwarya Xerox. Please wait ~1-2 minutes for your turn.',
-              actionText: 'Check Again'
+              actionText: 'Check Again',
+              showCamera: false
             });
           }
         }
       } catch (err) {
-        console.error('Session start error:', err);
+        alert('Connection error: ' + err.message);
       }
-    }
-
-    function showNotice({ icon, title, desc, actionText }) {
-      document.getElementById('orderFlowView').classList.add('hidden');
-      const notice = document.getElementById('noticeView');
-      notice.classList.remove('hidden');
-
-      document.getElementById('noticeIcon').textContent = icon;
-      document.getElementById('noticeTitle').textContent = title;
-      document.getElementById('noticeDesc').textContent = desc;
-
-      const action = document.getElementById('noticeAction');
-      if (actionText) {
-        action.classList.remove('hidden');
-        action.querySelector('a').textContent = actionText;
-      } else {
-        action.classList.add('hidden');
-      }
-    }
 
     let countdownInterval = null;
     function startLiveTimer(expiresAt) {
