@@ -12,8 +12,11 @@ export const config = {
   phonepe: {
     enabled: process.env.PHONEPE_ENABLED === 'true' || true,
     env: process.env.PHONEPE_ENV || 'PROD', // 'PROD' for live payments, 'UAT' for sandbox
-    merchantId: process.env.PHONEPE_MERCHANT_ID || 'AISHWARYAXEROXONLINE',
-    saltKey: process.env.PHONEPE_SALT_KEY || 'your-production-salt-key-here',
+    clientId: process.env.PHONEPE_CLIENT_ID || 'SU2601171811561696436105',
+    clientSecret: process.env.PHONEPE_CLIENT_SECRET || '',
+    clientVersion: process.env.PHONEPE_CLIENT_VERSION || '1',
+    merchantId: process.env.PHONEPE_MERCHANT_ID || 'SU2601171811561696436105',
+    saltKey: process.env.PHONEPE_SALT_KEY || '',
     saltIndex: process.env.PHONEPE_SALT_INDEX || '1'
   },
 

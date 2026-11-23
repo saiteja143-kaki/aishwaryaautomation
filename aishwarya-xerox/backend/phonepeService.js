@@ -6,11 +6,69 @@ export class PhonePeService {
     this.merchantId = process.env.PHONEPE_MERCHANT_ID || config.phonepe.merchantId;
     this.saltKey = process.env.PHONEPE_SALT_KEY || config.phonepe.saltKey;
     this.saltIndex = process.env.PHONEPE_SALT_INDEX || config.phonepe.saltIndex;
+    this.clientId = process.env.PHONEPE_CLIENT_ID || '';
+    this.clientSecret = process.env.PHONEPE_CLIENT_SECRET || '';
+    this.clientVersion = process.env.PHONEPE_CLIENT_VERSION || '1';
     this.env = process.env.PHONEPE_ENV || config.phonepe.env; // 'PROD' or 'UAT'
 
+    // V2 Standard Checkout Base URL
+    this.v2BaseUrl = this.env === 'PROD'
+      ? 'https://api.phonepe.com/apis/pg'
+      : 'https://api-preprod.phonepe.com/apis/pg-sandbox';
+
+    // OAuth 2.0 Identity Manager Token URL
+    this.oauthUrl = this.env === 'PROD'
+      ? 'https://api.phonepe.com/apis/identity-manager/v1/oauth/token'
+      : 'https://api-preprod.phonepe.com/apis/pg-sandbox/v1/oauth/token';
+
+    // V1 Hermes Base URL
     this.baseUrl = this.env === 'PROD' 
       ? 'https://api.phonepe.com/apis/hermes' 
       : 'https://api-preprod.phonepe.com/apis/pg-sandbox';
+
+    this.cachedOAuthToken = null;
+    this.tokenExpiresAt = 0;
+  }
+
+  /**
+   * PhonePe V2 Standard Checkout: Obtain OAuth 2.0 Access Token
+   */
+  async getOAuthToken() {
+    if (this.cachedOAuthToken && Date.now() < this.tokenExpiresAt) {
+      return this.cachedOAuthToken;
+    }
+
+    if (!this.clientId || !this.clientSecret) {
+      return null;
+    }
+
+    console.log(`[PhonePe Service] Requesting OAuth Token from ${this.oauthUrl}...`);
+    const params = new URLSearchParams();
+    params.append('client_id', this.clientId);
+    params.append('client_secret', this.clientSecret);
+    params.append('client_version', this.clientVersion);
+    params.append('grant_type', 'client_credentials');
+
+    try {
+      const res = await fetch(this.oauthUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params.toString()
+      });
+      const data = await res.json();
+      if (data.access_token) {
+        this.cachedOAuthToken = data.access_token;
+        this.tokenExpiresAt = Date.now() + ((data.expires_in || 3600) - 60) * 1000;
+        console.log(`[PhonePe Service] OAuth Token acquired successfully!`);
+        return this.cachedOAuthToken;
+      } else {
+        console.warn(`[PhonePe OAuth Notice]`, data);
+        return null;
+      }
+    } catch (e) {
+      console.warn(`[PhonePe OAuth Exception]`, e.message);
+      return null;
+    }
   }
 
   /**
@@ -58,7 +116,7 @@ export class PhonePeService {
   }
 
   /**
-   * Step 1: Initiate Payment Order with PhonePe Gateway
+   * Step 1: Initiate Payment Order with PhonePe Gateway (Standard Checkout V2 & V1)
    */
   async createPaymentOrder({
     orderId,
@@ -71,13 +129,57 @@ export class PhonePeService {
     const amountInPaise = Math.round(Number(amountInRupees) * 100);
     const sanitizedMobile = String(mobileNumber).replace(/\D/g, '').slice(-10) || '9999999999';
 
-    // Verify if URLs are HTTPS (PhonePe requires public HTTPS endpoints)
-    const isHttps = returnUrl.startsWith('https://') && callbackUrl.startsWith('https://');
+    // 1. Check if PhonePe V2 Standard Checkout OAuth is available
+    const oauthToken = await this.getOAuthToken();
+    if (oauthToken) {
+      console.log(`[PhonePe Service] Calling Standard Checkout V2 (/checkout/v2/pay) for ${orderId} (₹${amountInRupees})`);
+      try {
+        const v2Payload = {
+          merchantOrderId: orderId,
+          amount: amountInPaise,
+          expireAfter: 900, // 15 mins checkout session
+          paymentFlow: {
+            type: 'PG_CHECKOUT',
+            message: `Aishwarya Xerox Order ${orderId}`,
+            merchantUrls: {
+              redirectUrl: returnUrl
+            }
+          },
+          metaInfo: {
+            shop: 'Aishwarya Xerox',
+            mobile: sanitizedMobile
+          }
+        };
 
-    if (!isHttps) {
-      console.warn(`[PhonePe] Notice: returnUrl/callbackUrl is HTTP/local IP. PhonePe PG requires public HTTPS.`);
+        const response = await fetch(`${this.v2BaseUrl}/checkout/v2/pay`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `O-Bearer ${oauthToken}`
+          },
+          body: JSON.stringify(v2Payload)
+        });
+
+        const data = await response.json();
+        console.log(`[PhonePe V2 Response]`, data.state, data.redirectUrl ? 'received redirectUrl' : '');
+
+        if (data.redirectUrl) {
+          return {
+            success: true,
+            version: 'V2',
+            mode: 'PG_CHECKOUT_V2',
+            redirectUrl: data.redirectUrl,
+            orderId: data.orderId,
+            merchantOrderId: orderId,
+            amountInPaise
+          };
+        }
+      } catch (err) {
+        console.warn(`[PhonePe V2 Notice]`, err.message);
+      }
     }
 
+    // 2. V1 Hermes Standard Checkout (/pg/v1/pay)
     const payload = {
       merchantId: this.merchantId,
       merchantTransactionId: orderId,
@@ -95,7 +197,7 @@ export class PhonePeService {
     const base64Payload = Buffer.from(JSON.stringify(payload)).toString('base64');
     const checksum = this.generateChecksum(base64Payload, '/pg/v1/pay');
 
-    console.log(`[PhonePe Service] Calling PhonePe Hermes (${this.env}): /pg/v1/pay for ${orderId} (Amount: ₹${amountInRupees})`);
+    console.log(`[PhonePe Service] Calling PhonePe Hermes V1 (${this.env}): /pg/v1/pay for ${orderId} (Amount: ₹${amountInRupees})`);
 
     try {
       const response = await fetch(`${this.baseUrl}/pg/v1/pay`, {
@@ -113,13 +215,14 @@ export class PhonePeService {
       if (data.success && data.data?.instrumentResponse?.redirectInfo?.url) {
         return {
           success: true,
+          version: 'V1',
           mode: 'PG_WEB_CHECKOUT',
           redirectUrl: data.data.instrumentResponse.redirectInfo.url,
           merchantTransactionId: orderId,
           amountInPaise
         };
       } else {
-        console.warn(`[PhonePe Service] Gateway returned non-success:`, data);
+        console.warn(`[PhonePe Service] Gateway returned:`, data.code, data.message);
         return {
           success: false,
           error: data.message || 'PhonePe Gateway Error',
@@ -137,10 +240,31 @@ export class PhonePeService {
   }
 
   /**
-   * Step 2: Double-Check Order Status Directly with PhonePe Hermes API (Zero-Trust Security)
+   * Step 2: Double-Check Order Status Directly with PhonePe Hermes / V2 API
    */
-  async checkPaymentStatus(merchantTransactionId) {
-    const apiEndpoint = `/pg/v1/status/${this.merchantId}/${merchantTransactionId}`;
+  async checkPaymentStatus(merchantOrderId) {
+    const oauthToken = await this.getOAuthToken();
+    if (oauthToken) {
+      try {
+        const response = await fetch(`${this.v2BaseUrl}/checkout/v2/order/${merchantOrderId}/status`, {
+          method: 'GET',
+          headers: {
+            'Authorization': `O-Bearer ${oauthToken}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        const result = await response.json();
+        return {
+          isSuccess: result.state === 'COMPLETED' || result.state === 'SUCCESS',
+          code: result.state,
+          message: result.state,
+          amountInPaise: result.amount,
+          transactionId: result.orderId
+        };
+      } catch (e) {}
+    }
+
+    const apiEndpoint = `/pg/v1/status/${this.merchantId}/${merchantOrderId}`;
     const stringToHash = apiEndpoint + this.saltKey;
     const sha256 = crypto.createHash('sha256').update(stringToHash).digest('hex');
     const checksum = `${sha256}###${this.saltIndex}`;

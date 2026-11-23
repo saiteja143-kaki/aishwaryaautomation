@@ -94,12 +94,18 @@ app.get('/api/kiosk/info', async (req, res) => {
   try {
     const status = sessionManager.getStatus();
     const reqHost = req.get('host') || `localhost:${config.port}`;
-    const protocol = req.protocol;
+    let protocol = req.protocol;
     
-    // Auto-detect reachable host: If host or PUBLIC_URL is localhost, swap with real Wi-Fi IP so phone can connect!
+    // Auto-detect reachable host: If host or PUBLIC_URL is localhost, swap with real Wi-Fi IP or tunnel host
     let reachableHost = reqHost;
+    const forwardedProto = req.headers['x-forwarded-proto'];
+    const isHttps = forwardedProto === 'https' || (process.env.PUBLIC_URL && process.env.PUBLIC_URL.startsWith('https://'));
+    protocol = isHttps ? 'https' : req.protocol;
+
     if (process.env.PUBLIC_URL && !process.env.PUBLIC_URL.includes('localhost') && !process.env.PUBLIC_URL.includes('127.0.0.1')) {
       reachableHost = process.env.PUBLIC_URL.replace(/^https?:\/\//, '').replace(/\/$/, '');
+    } else if (req.headers['x-forwarded-host']) {
+      reachableHost = req.headers['x-forwarded-host'];
     } else {
       const portPart = (reqHost.includes(':') ? reqHost.split(':')[1] : config.port);
       reachableHost = `${localLanIp}:${portPart}`;
@@ -379,9 +385,17 @@ app.post('/api/payment/phonepe/initiate', async (req, res) => {
       orderId: order.orderId
     });
 
-    const host = req.get('host');
-    const protocol = req.protocol;
-    const publicUrl = process.env.PUBLIC_URL || `${protocol}://${host}`;
+    const host = req.headers['x-forwarded-host'] || req.get('host');
+    const forwardedProto = req.headers['x-forwarded-proto'];
+    const protocol = (forwardedProto === 'https' || (process.env.PUBLIC_URL && process.env.PUBLIC_URL.startsWith('https://'))) ? 'https' : req.protocol;
+    
+    // Determine public URL (supports Cloudflare tunnel host automatically)
+    let publicUrl = process.env.PUBLIC_URL;
+    if (forwardedProto === 'https' && host) {
+      publicUrl = `https://${host}`;
+    } else if (!publicUrl || publicUrl.includes('localhost') || publicUrl.includes('127.0.0.1')) {
+      publicUrl = `${protocol}://${host}`;
+    }
     const isPublicHttps = publicUrl.startsWith('https://');
 
     // If running with a public HTTPS domain, call PhonePe PG Hermes API
@@ -389,7 +403,7 @@ app.post('/api/payment/phonepe/initiate', async (req, res) => {
       const returnUrl = `${publicUrl}/api/payment/phonepe/redirect?orderId=${orderId}`;
       const callbackUrl = `${publicUrl}/api/payment/phonepe/webhook`;
 
-      console.log(`[PhonePe] Calling Hermes PG for Order ${orderId} (Amount: ₹${order.amount}) via HTTPS`);
+      console.log(`[PhonePe] Calling Hermes PG for Order ${orderId} (Amount: ₹${order.amount}) via HTTPS: ${publicUrl}`);
       const pgOrder = await phonePeService.createPaymentOrder({
         orderId,
         amountInRupees: order.amount,
@@ -403,6 +417,16 @@ app.post('/api/payment/phonepe/initiate', async (req, res) => {
           success: true,
           mode: 'PG_REDIRECT',
           redirectUrl: pgOrder.redirectUrl,
+          upiIntents,
+          orderId
+        });
+      } else {
+        console.warn(`[PhonePe PG Notice] Hermes PG returned:`, pgOrder.error || pgOrder.code);
+        return res.json({
+          success: false,
+          error: pgOrder.error || 'PhonePe Gateway Error',
+          code: pgOrder.code,
+          details: pgOrder.details,
           upiIntents,
           orderId
         });
