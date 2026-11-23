@@ -109,6 +109,12 @@
           <span>Open Camera & Scan QR</span>
         </button>
 
+        <!-- Direct Quick Start (No QR Scan Needed) -->
+        <button type="button" onclick="autoStartDirectSession()" class="w-full py-3.5 bg-slate-900 hover:bg-slate-800 text-white font-extrabold rounded-2xl shadow-md active:scale-95 transition flex items-center justify-center gap-2 text-sm border border-slate-700">
+          <span class="text-base">⚡</span>
+          <span>Start Direct Session (No Scan Needed)</span>
+        </button>
+
         <!-- Manual 6-character Code Fallback -->
         <div class="pt-2 border-t border-slate-100">
           <details class="text-xs text-slate-500">
@@ -146,15 +152,22 @@
           <span class="text-xs text-slate-400">PDF, JPG, PNG, DOCX</span>
         </div>
 
-        <!-- Upload Dropzone -->
-        <div id="dropZone" onclick="document.getElementById('fileInput').click()" class="border-2 border-dashed border-slate-300 hover:border-amber-500 rounded-2xl p-6 text-center cursor-pointer transition bg-slate-50/50 hover:bg-amber-50/30">
+        <!-- Upload Dropzone (Native Label for Instant Mobile Tap) -->
+        <label for="fileInput" id="dropZone" class="block border-2 border-dashed border-slate-300 hover:border-amber-500 rounded-2xl p-6 text-center cursor-pointer transition bg-slate-50/50 hover:bg-amber-50/30">
           <input type="file" id="fileInput" accept=".pdf,image/*,.doc,.docx" class="hidden" onchange="handleFileSelect(event)">
-          <div class="w-12 h-12 mx-auto rounded-2xl bg-amber-100 text-amber-600 flex items-center justify-center text-2xl mb-2">
-            📄
+          <div id="dropZoneContent">
+            <div class="w-12 h-12 mx-auto rounded-2xl bg-amber-100 text-amber-600 flex items-center justify-center text-2xl mb-2">
+              📄
+            </div>
+            <p class="font-bold text-sm text-slate-800">Tap to Select Document</p>
+            <p class="text-xs text-slate-500 mt-1">PDF, JPG, PNG or DOCX from Files/WhatsApp</p>
           </div>
-          <p class="font-bold text-sm text-slate-800">Tap to Select Document</p>
-          <p class="text-xs text-slate-500 mt-1">From WhatsApp, Files, or Downloads</p>
-        </div>
+          <div id="dropZoneLoading" class="hidden">
+            <div class="animate-spin text-3xl mb-2">⏳</div>
+            <p class="font-bold text-sm text-slate-800">Analyzing document...</p>
+            <p class="text-xs text-slate-500 mt-1">Counting pages & calculating cost...</p>
+          </div>
+        </label>
 
         <!-- Uploaded File Badge -->
         <div id="fileInfoCard" class="hidden p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center justify-between">
@@ -798,6 +811,43 @@
       } catch (err) {
         alert('Connection error: ' + err.message);
       }
+    }
+
+    // Direct Quick Start (For testing or immediate printing when standing at shop)
+    async function autoStartDirectSession() {
+      try {
+        const res = await fetch('/api/session/auto-start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        const data = await res.json();
+        if (data.success) {
+          currentSessionId = data.sessionId;
+          sessionStorage.setItem('ax_sessionId', currentSessionId);
+          socket.emit('session:join', { sessionId: currentSessionId });
+          document.getElementById('noticeView').classList.add('hidden');
+          document.getElementById('orderFlowView').classList.remove('hidden');
+          document.getElementById('sessionTimerBadge').classList.remove('hidden');
+          document.getElementById('btnCancelSession').classList.remove('hidden');
+          startHeartbeat();
+          startLiveTimer(data.expiresAt);
+        } else {
+          if (data.reason === 'KIOSK_BUSY') {
+            showNotice({
+              icon: '⏳',
+              title: 'Kiosk is in Use',
+              desc: 'Another customer is currently printing at Aishwarya Xerox. Please wait ~1-2 minutes for your turn.',
+              actionText: 'Check Again',
+              showCamera: false
+            });
+          } else {
+            alert(data.message || 'Could not start session.');
+          }
+        }
+      } catch (e) {
+        alert('Network error connecting to kiosk: ' + e.message);
+      }
+    }
 
     let countdownInterval = null;
     function startLiveTimer(expiresAt) {
@@ -845,19 +895,41 @@
 
     // File selection & upload
     async function handleFileSelect(e) {
-      const file = e.target.files[0];
+      const file = e.target.files && e.target.files[0];
       if (!file) return;
 
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('sessionId', currentSessionId);
-
-      document.getElementById('dropZone').innerHTML = `
-        <div class="animate-spin text-3xl mb-2">⏳</div>
-        <p class="font-bold text-sm text-slate-700">Analyzing document...</p>
-      `;
+      const dropContent = document.getElementById('dropZoneContent');
+      const dropLoading = document.getElementById('dropZoneLoading');
+      if (dropContent) dropContent.classList.add('hidden');
+      if (dropLoading) dropLoading.classList.remove('hidden');
 
       try {
+        // If no active session, attempt auto-claim session first
+        if (!currentSessionId) {
+          const startRes = await fetch('/api/session/auto-start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+          });
+          const startData = await startRes.json();
+          if (startData.success) {
+            currentSessionId = startData.sessionId;
+            sessionStorage.setItem('ax_sessionId', currentSessionId);
+            socket.emit('session:join', { sessionId: currentSessionId });
+            document.getElementById('sessionTimerBadge').classList.remove('hidden');
+            document.getElementById('btnCancelSession').classList.remove('hidden');
+            startHeartbeat();
+            startLiveTimer(startData.expiresAt);
+          } else {
+            alert(startData.message || 'Kiosk is currently locked or in use. Please wait.');
+            resetFile();
+            return;
+          }
+        }
+
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('sessionId', currentSessionId);
+
         const res = await fetch('/api/upload', {
           method: 'POST',
           body: formData
@@ -865,6 +937,13 @@
         const data = await res.json();
 
         if (data.success) {
+          // If upload endpoint auto-assigned a sessionId
+          if (data.sessionId && !currentSessionId) {
+            currentSessionId = data.sessionId;
+            sessionStorage.setItem('ax_sessionId', currentSessionId);
+            socket.emit('session:join', { sessionId: currentSessionId });
+          }
+
           currentFile = data;
           document.getElementById('dropZone').classList.add('hidden');
           document.getElementById('fileInfoCard').classList.remove('hidden');
@@ -886,15 +965,15 @@
 
     function resetFile() {
       currentFile = null;
-      document.getElementById('fileInput').value = '';
+      const fileInput = document.getElementById('fileInput');
+      if (fileInput) fileInput.value = '';
+      const dropContent = document.getElementById('dropZoneContent');
+      const dropLoading = document.getElementById('dropZoneLoading');
+      if (dropContent) dropContent.classList.remove('hidden');
+      if (dropLoading) dropLoading.classList.add('hidden');
+
       document.getElementById('fileInfoCard').classList.add('hidden');
       document.getElementById('dropZone').classList.remove('hidden');
-      document.getElementById('dropZone').innerHTML = `
-        <input type="file" id="fileInput" accept=".pdf,image/*,.doc,.docx" class="hidden" onchange="handleFileSelect(event)">
-        <div class="w-12 h-12 mx-auto rounded-2xl bg-amber-100 text-amber-600 flex items-center justify-center text-2xl mb-2">📄</div>
-        <p class="font-bold text-sm text-slate-800">Tap to Select Document</p>
-        <p class="text-xs text-slate-500 mt-1">From WhatsApp, Files, or Downloads</p>
-      `;
       document.getElementById('optionsSection').classList.add('hidden');
       document.getElementById('billSection').classList.add('hidden');
     }

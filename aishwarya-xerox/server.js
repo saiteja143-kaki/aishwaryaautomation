@@ -146,6 +146,25 @@ app.post('/api/session/start', (req, res) => {
   res.json(result);
 });
 
+// Auto-start / claim session if kiosk is IDLE (Direct mobile access & testing)
+app.post('/api/session/auto-start', (req, res) => {
+  const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+  if (sessionManager.status !== 'IDLE') {
+    return res.json({
+      success: false,
+      reason: 'KIOSK_BUSY',
+      message: 'Kiosk is currently in use by another customer. Please wait ~1-2 minutes.',
+      status: sessionManager.getStatus()
+    });
+  }
+  const token = sessionManager.activeClaimToken?.token;
+  if (!token) {
+    sessionManager.generateNewClaimToken();
+  }
+  const result = sessionManager.claimSessionWithToken(sessionManager.activeClaimToken.token, clientIp);
+  res.json(result);
+});
+
 // Resume Active Session (Handles mobile phone back navigation & accidental page refresh)
 app.post('/api/session/resume', (req, res) => {
   const { sessionId } = req.body;
@@ -211,7 +230,21 @@ app.post('/api/session/cancel', (req, res) => {
 // Upload Document
 app.post('/api/upload', upload.single('file'), async (req, res) => {
   try {
-    const { sessionId } = req.body;
+    let { sessionId } = req.body;
+    console.log(`[Upload Request] Received file: ${req.file?.originalname} (${req.file?.size} bytes), sessionId: ${sessionId}`);
+
+    // If sessionId is missing or invalid, check if kiosk is IDLE and auto-claim session
+    if (!sessionManager.validateSession(sessionId)) {
+      if (sessionManager.status === 'IDLE') {
+        const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+        const autoClaim = sessionManager.claimSessionWithToken(sessionManager.activeClaimToken?.token, clientIp);
+        if (autoClaim.success) {
+          sessionId = autoClaim.sessionId;
+          console.log(`[Upload Request] Auto-claimed idle session ${sessionId} for incoming file`);
+        }
+      }
+    }
+
     if (!sessionManager.validateSession(sessionId)) {
       if (req.file && fs.existsSync(req.file.path)) {
         fs.unlinkSync(req.file.path);
@@ -236,15 +269,19 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
       uploadedAt: new Date().toISOString()
     });
 
+    console.log(`[Upload Success] FileId: ${fileId}, Name: ${analysis.fileName}, Pages: ${analysis.pageCount}`);
+
     res.json({
       success: true,
       fileId,
+      sessionId,
       fileName: analysis.fileName,
       fileType: analysis.fileType,
       fileSize: analysis.fileSize,
       pageCount: analysis.pageCount
     });
   } catch (err) {
+    console.error('[Upload Error]', err);
     res.status(500).json({ error: err.message });
   }
 });
