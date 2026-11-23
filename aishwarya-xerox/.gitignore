@@ -1,0 +1,36 @@
+# ==========================================
+# SECURE GIT IGNORE - AISHWARYA XEROX
+# ==========================================
+
+# 1. Environment Secrets (NEVER COMMIT!)
+.env
+.env.local
+.env.*.local
+*.env
+!*.env.example
+
+# 2. Dependencies
+node_modules/
+package-lock.json.bak
+
+# 3. Customer Uploaded Files (Privacy Protection!)
+uploads/*
+!uploads/.gitkeep
+temp_prints/*
+!temp_prints/.gitkeep
+print-agent/temp_prints/*
+
+# 4. Logs and debug output
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 5. OS and Editor Files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+

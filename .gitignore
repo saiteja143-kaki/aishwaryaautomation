@@ -1,0 +1,10 @@
+# Root Git Ignore
+.env
+*.env
+!*.env.example
+node_modules/
+uploads/
+temp_prints/
+.DS_Store
+*.log
+

@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aishwarya Xerox - Shop Owner Admin Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Plus Jakarta Sans', sans-serif; }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen p-6">
+
+  <!-- Header -->
+  <header class="max-w-6xl mx-auto flex flex-wrap items-center justify-between pb-6 border-b border-slate-800 gap-4">
+    <div class="flex items-center gap-4">
+      <div class="w-12 h-12 bg-gradient-to-tr from-amber-500 to-yellow-300 rounded-2xl flex items-center justify-center font-black text-xl text-slate-950 shadow-md">
+        AX
+      </div>
+      <div>
+        <h1 class="text-2xl font-black text-white">Aishwarya Xerox • Owner Dashboard</h1>
+        <p class="text-xs text-slate-400">Live Kiosk Control, Print Spooler & Revenue Monitoring</p>
+      </div>
+    </div>
+
+    <div class="flex items-center gap-3">
+      <!-- Agent Connection Status -->
+      <div id="agentBadge" class="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800 border border-slate-700 text-xs font-bold text-slate-400">
+        <span class="w-2.5 h-2.5 rounded-full bg-slate-500" id="agentDot"></span>
+        <span id="agentText">Shop PC Agent: Checking...</span>
+      </div>
+
+      <!-- Quick Links -->
+      <a href="/kiosk" target="_blank" class="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 transition">
+        📺 View Outside Screen
+      </a>
+      <a href="/mobile" target="_blank" class="px-3 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold rounded-xl transition">
+        📱 Customer View
+      </a>
+    </div>
+  </header>
+
+  <!-- Main Grid -->
+  <main class="max-w-6xl mx-auto mt-6 space-y-6">
+
+    <!-- KPI & Emergency Control Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+
+      <!-- Kiosk Lock Status Card -->
+      <div class="bg-slate-800/80 border border-slate-700 p-5 rounded-3xl space-y-2">
+        <p class="text-xs uppercase tracking-wider text-slate-400 font-bold">Outside Kiosk Lock</p>
+        <div class="flex items-center justify-between">
+          <p id="kioskStatusText" class="text-2xl font-black text-emerald-400">IDLE</p>
+          <button onclick="forceUnlockKiosk()" class="px-3 py-1.5 bg-red-600/20 hover:bg-red-600/40 border border-red-500/40 text-red-300 rounded-xl text-xs font-black transition active:scale-95">
+            Force Reset
+          </button>
+        </div>
+        <p id="kioskSessionInfo" class="text-xs text-slate-500">Ready for scan</p>
+      </div>
+
+      <!-- Revenue Card -->
+      <div class="bg-slate-800/80 border border-slate-700 p-5 rounded-3xl space-y-1">
+        <p class="text-xs uppercase tracking-wider text-slate-400 font-bold">Today's Revenue</p>
+        <p id="totalRevenue" class="text-3xl font-black text-amber-400">₹0.00</p>
+        <p class="text-xs text-slate-500">Self-service Kiosk Prints</p>
+      </div>
+
+      <!-- Total Orders Card -->
+      <div class="bg-slate-800/80 border border-slate-700 p-5 rounded-3xl space-y-1">
+        <p class="text-xs uppercase tracking-wider text-slate-400 font-bold">Completed Orders</p>
+        <p id="totalOrders" class="text-3xl font-black text-white">0</p>
+        <p class="text-xs text-slate-500">Auto-printed via Canon</p>
+      </div>
+
+      <!-- Test Payment Mode Card -->
+      <div class="bg-slate-800/80 border border-slate-700 p-5 rounded-3xl space-y-2">
+        <p class="text-xs uppercase tracking-wider text-slate-400 font-bold">Payment Mode</p>
+        <div class="flex items-center justify-between">
+          <span id="testModeBadge" class="text-xs font-black px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300">
+            TRIAL (TEST PAY ON)
+          </span>
+          <button onclick="toggleTestMode()" class="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-xs font-bold text-slate-200 rounded-lg transition">
+            Toggle
+          </button>
+        </div>
+        <p class="text-[11px] text-slate-400">Allows instant 1-click test orders.</p>
+      </div>
+
+    </div>
+
+    <!-- Rate Card Editor & Live Orders -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+      <!-- Rate Card Settings -->
+      <div class="bg-slate-800/80 border border-slate-700 p-6 rounded-3xl space-y-4">
+        <div class="flex items-center justify-between border-b border-slate-700 pb-3">
+          <h2 class="font-extrabold text-base text-white flex items-center gap-2">
+            ⚙️ Rate Card Settings
+          </h2>
+          <span class="text-xs text-amber-400 font-bold">₹ INR</span>
+        </div>
+
+        <form id="ratesForm" onsubmit="saveRates(event)" class="space-y-3 text-xs">
+          <div>
+            <label class="block text-slate-400 font-bold mb-1">B&W Single Sided (per page)</label>
+            <input type="number" step="0.5" id="rateBwSingle" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-white font-bold">
+          </div>
+
+          <div>
+            <label class="block text-slate-400 font-bold mb-1">B&W Double Sided (per sheet)</label>
+            <input type="number" step="0.5" id="rateBwDuplex" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-white font-bold">
+          </div>
+
+          <div>
+            <label class="block text-slate-400 font-bold mb-1">Color Single Sided (per page)</label>
+            <input type="number" step="0.5" id="rateColorSingle" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-white font-bold">
+          </div>
+
+          <div>
+            <label class="block text-slate-400 font-bold mb-1">Color Double Sided (per sheet)</label>
+            <input type="number" step="0.5" id="rateColorDuplex" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-white font-bold">
+          </div>
+
+          <button type="submit" class="w-full py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl text-xs transition active:scale-95 shadow-md">
+            Save Rate Changes
+          </button>
+        </form>
+      </div>
+
+      <!-- Live Orders List -->
+      <div class="lg:col-span-2 bg-slate-800/80 border border-slate-700 p-6 rounded-3xl space-y-4">
+        <div class="flex items-center justify-between border-b border-slate-700 pb-3">
+          <h2 class="font-extrabold text-base text-white flex items-center gap-2">
+            📋 Kiosk Orders & Print History
+          </h2>
+          <button onclick="fetchDashboardData()" class="text-xs text-slate-400 hover:text-white transition">
+            🔄 Refresh
+          </button>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs text-slate-300">
+            <thead class="bg-slate-900/60 text-slate-400 uppercase font-black text-[10px]">
+              <tr>
+                <th class="p-3">Order ID</th>
+                <th class="p-3">Document</th>
+                <th class="p-3">Options</th>
+                <th class="p-3">Amount</th>
+                <th class="p-3">Status</th>
+                <th class="p-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="ordersTableBody" class="divide-y divide-slate-700/50">
+              <tr>
+                <td colspan="6" class="p-4 text-center text-slate-500">No orders placed yet.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+
+  </main>
+
+  <script>
+    const socket = io();
+    let isTestMode = true;
+
+    async function fetchDashboardData() {
+      try {
+        const res = await fetch('/api/admin/dashboard');
+        const data = await res.json();
+
+        // Kiosk Status
+        const kioskStatus = data.kioskStatus;
+        const statusText = document.getElementById('kioskStatusText');
+        const sessionInfo = document.getElementById('kioskSessionInfo');
+
+        statusText.textContent = kioskStatus.status;
+        if (kioskStatus.status === 'IDLE') {
+          statusText.className = "text-2xl font-black text-emerald-400";
+          sessionInfo.textContent = "Outside screen: Ready for scan";
+        } else if (kioskStatus.status === 'IN_USE') {
+          statusText.className = "text-2xl font-black text-amber-400";
+          sessionInfo.textContent = `In use • Remaining: ~${kioskStatus.remainingSeconds}s`;
+        } else {
+          statusText.className = "text-2xl font-black text-blue-400";
+          sessionInfo.textContent = `Printing Order #${kioskStatus.orderId}`;
+        }
+
+        // Agent Status
+        updateAgentUI(data.isAgentConnected);
+
+        // Test Mode
+        isTestMode = data.testMode;
+        document.getElementById('testModeBadge').textContent = isTestMode ? "TRIAL (TEST PAY ON)" : "PRODUCTION (REAL UPI)";
+        document.getElementById('testModeBadge').className = isTestMode 
+          ? "text-xs font-black px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300"
+          : "text-xs font-black px-2.5 py-1 rounded-full bg-blue-500/20 text-blue-300";
+
+        // Revenue & Orders
+        document.getElementById('totalRevenue').textContent = `₹${data.totalRevenue.toFixed(2)}`;
+        document.getElementById('totalOrders').textContent = data.orders.length;
+
+        // Populate Rates
+        document.getElementById('rateBwSingle').value = data.rates.bw.single;
+        document.getElementById('rateBwDuplex').value = data.rates.bw.duplexSheet;
+        document.getElementById('rateColorSingle').value = data.rates.color.single;
+        document.getElementById('rateColorDuplex').value = data.rates.color.duplexSheet;
+
+        // Populate Orders Table
+        renderOrders(data.orders);
+
+      } catch (err) {
+        console.error('Failed to fetch dashboard data:', err);
+      }
+    }
+
+    function updateAgentUI(connected) {
+      const dot = document.getElementById('agentDot');
+      const text = document.getElementById('agentText');
+      if (connected) {
+        dot.className = "w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse";
+        text.textContent = "Shop PC Agent: Online";
+        text.className = "text-emerald-400 font-bold";
+      } else {
+        dot.className = "w-2.5 h-2.5 rounded-full bg-amber-400";
+        text.textContent = "Shop PC Agent: Local Simulator";
+        text.className = "text-amber-400 font-bold";
+      }
+    }
+
+    function renderOrders(orders) {
+      const tbody = document.getElementById('ordersTableBody');
+      if (!orders || orders.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="p-4 text-center text-slate-500">No orders placed yet.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = orders.map(o => `
+        <tr class="hover:bg-slate-700/30 transition">
+          <td class="p-3 font-bold text-white">${o.orderId}</td>
+          <td class="p-3 truncate max-w-[150px]" title="${o.fileName}">${o.fileName}</td>
+          <td class="p-3">${o.options?.colorMode?.toUpperCase()} • ${o.options?.isDuplex ? 'Duplex' : 'Single'}</td>
+          <td class="p-3 font-black text-amber-400">₹${o.amount?.toFixed(2)}</td>
+          <td class="p-3">
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-black ${
+              o.status === 'COMPLETED' ? 'bg-emerald-500/20 text-emerald-300' :
+              o.status === 'PRINTING' ? 'bg-blue-500/20 text-blue-300' :
+              o.status === 'QUEUED' ? 'bg-amber-500/20 text-amber-300' : 'bg-slate-700 text-slate-400'
+            }">${o.status}</span>
+          </td>
+          <td class="p-3 text-right">
+            <button onclick="reprintOrder('${o.orderId}')" class="px-2 py-1 bg-slate-700 hover:bg-slate-600 text-[11px] font-bold rounded-lg transition">
+              Reprint 🖨️
+            </button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    async function forceUnlockKiosk() {
+      if (!confirm('Are you sure you want to force unlock the outside kiosk?')) return;
+      try {
+        const res = await fetch('/api/admin/force-unlock', { method: 'POST' });
+        const data = await res.json();
+        alert(data.message);
+        fetchDashboardData();
+      } catch (err) {
+        alert('Error: ' + err.message);
+      }
+    }
+
+    async function toggleTestMode() {
+      try {
+        const res = await fetch('/api/admin/toggle-test-mode', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: !isTestMode })
+        });
+        const data = await res.json();
+        fetchDashboardData();
+      } catch (err) {
+        alert('Error: ' + err.message);
+      }
+    }
+
+    async function saveRates(e) {
+      e.preventDefault();
+      try {
+        const rates = {
+          bw: {
+            single: parseFloat(document.getElementById('rateBwSingle').value),
+            duplexSheet: parseFloat(document.getElementById('rateBwDuplex').value)
+          },
+          color: {
+            single: parseFloat(document.getElementById('rateColorSingle').value),
+            duplexSheet: parseFloat(document.getElementById('rateColorDuplex').value)
+          }
+        };
+
+        const res = await fetch('/api/admin/rates', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rates })
+        });
+        const data = await res.json();
+        alert('Rates updated successfully!');
+      } catch (err) {
+        alert('Error saving rates: ' + err.message);
+      }
+    }
+
+    async function reprintOrder(orderId) {
+      if (!confirm(`Reprint order ${orderId} on Canon?`)) return;
+      try {
+        const res = await fetch(`/api/admin/reprint/${orderId}`, { method: 'POST' });
+        const data = await res.json();
+        alert(data.message);
+        fetchDashboardData();
+      } catch (err) {
+        alert('Error: ' + err.message);
+      }
+    }
+
+    // Socket live updates
+    socket.on('kiosk:status', () => fetchDashboardData());
+    socket.on('admin:order_update', () => fetchDashboardData());
+    socket.on('admin:agent_status', (data) => updateAgentUI(data.connected));
+
+    // Boot
+    fetchDashboardData();
+  </script>
+</body>
+</html>
+

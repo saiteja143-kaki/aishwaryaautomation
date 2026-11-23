@@ -1,0 +1,14 @@
+{
+  "name": "aishwarya-xerox-print-agent",
+  "version": "1.0.0",
+  "description": "Shop PC Local Print Agent for Canon LAN Printer",
+  "main": "agent.js",
+  "type": "module",
+  "scripts": {
+    "start": "node agent.js"
+  },
+  "dependencies": {
+    "socket.io-client": "^4.8.1"
+  }
+}
+

@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Aishwarya Xerox - Mobile Self-Service</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Plus Jakarta Sans', sans-serif; }
+    input[type=number]::-webkit-inner-spin-button, 
+    input[type=number]::-webkit-outer-spin-button { 
+      -webkit-appearance: none; 
+      margin: 0; 
+    }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-800 min-h-screen flex flex-col justify-between">
+
+  <!-- Mobile Top Bar -->
+  <header class="bg-slate-900 text-white p-4 shadow-md sticky top-0 z-50 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 bg-gradient-to-tr from-amber-500 to-yellow-300 rounded-xl flex items-center justify-center font-black text-slate-950 text-lg">
+        AX
+      </div>
+      <div>
+        <h1 class="font-extrabold text-base leading-tight">Aishwarya Xerox</h1>
+        <p class="text-xs text-amber-300/90 font-medium">Smart Self-Service Printing</p>
+      </div>
+    </div>
+    <div class="flex items-center gap-2">
+      <div id="sessionTimerBadge" class="hidden text-xs bg-slate-800 text-amber-400 font-bold px-2.5 py-1 rounded-full border border-slate-700">
+        ⏱️ <span id="timerText">3:00</span>
+      </div>
+      <button id="btnCancelSession" onclick="cancelSessionPrompt()" class="hidden text-xs bg-red-950/80 text-red-300 border border-red-500/40 px-2.5 py-1 rounded-full font-bold active:scale-95 transition">
+        ✕ Cancel
+      </button>
+    </div>
+  </header>
+
+  <!-- Container -->
+  <main class="max-w-md mx-auto w-full p-4 flex-grow space-y-4">
+
+    <!-- BUSY / EXPIRED SCREEN -->
+    <div id="noticeView" class="hidden bg-white p-6 rounded-3xl shadow-sm border border-slate-200 text-center space-y-4 my-8">
+      <div id="noticeIcon" class="w-20 h-20 mx-auto rounded-full bg-amber-100 text-amber-600 flex items-center justify-center text-4xl">
+        ⏳
+      </div>
+      <h2 id="noticeTitle" class="text-2xl font-black text-slate-900">Kiosk is in Use</h2>
+      <p id="noticeDesc" class="text-sm text-slate-600">Another customer is currently printing at Aishwarya Xerox. Please wait ~1-2 minutes for your turn.</p>
+      <div id="noticeAction" class="pt-2">
+        <a href="javascript:void(0)" onclick="window.location.reload()" class="inline-block w-full py-3 bg-slate-900 text-white font-bold rounded-2xl shadow-md active:scale-95 transition text-sm">
+          Check Again
+        </a>
+      </div>
+    </div>
+
+    <!-- MAIN ORDERING FLOW -->
+    <div id="orderFlowView" class="space-y-4">
+
+      <!-- STEP 1: UPLOAD FILE -->
+      <section class="bg-white p-5 rounded-3xl shadow-sm border border-slate-200/80 space-y-3">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-black flex items-center justify-center">1</span>
+            <h2 class="font-bold text-base text-slate-900">Upload Document</h2>
+          </div>
+          <span class="text-xs text-slate-400">PDF, JPG, PNG, DOCX</span>
+        </div>
+
+        <!-- Upload Dropzone -->
+        <div id="dropZone" onclick="document.getElementById('fileInput').click()" class="border-2 border-dashed border-slate-300 hover:border-amber-500 rounded-2xl p-6 text-center cursor-pointer transition bg-slate-50/50 hover:bg-amber-50/30">
+          <input type="file" id="fileInput" accept=".pdf,image/*,.doc,.docx" class="hidden" onchange="handleFileSelect(event)">
+          <div class="w-12 h-12 mx-auto rounded-2xl bg-amber-100 text-amber-600 flex items-center justify-center text-2xl mb-2">
+            📄
+          </div>
+          <p class="font-bold text-sm text-slate-800">Tap to Select Document</p>
+          <p class="text-xs text-slate-500 mt-1">From WhatsApp, Files, or Downloads</p>
+        </div>
+
+        <!-- Uploaded File Badge -->
+        <div id="fileInfoCard" class="hidden p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center justify-between">
+          <div class="flex items-center gap-3 overflow-hidden">
+            <span class="text-2xl">📑</span>
+            <div class="truncate">
+              <p id="uploadedFileName" class="text-sm font-bold text-slate-900 truncate">document.pdf</p>
+              <p id="uploadedFileMeta" class="text-xs text-emerald-700 font-semibold">5 Pages • 1.2 MB</p>
+            </div>
+          </div>
+          <button onclick="resetFile()" class="text-slate-400 hover:text-red-500 text-sm font-bold p-1">✕</button>
+        </div>
+      </section>
+
+      <!-- STEP 2: PRINT OPTIONS -->
+      <section id="optionsSection" class="hidden bg-white p-5 rounded-3xl shadow-sm border border-slate-200/80 space-y-4">
+        <div class="flex items-center gap-2">
+          <span class="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-black flex items-center justify-center">2</span>
+          <h2 class="font-bold text-base text-slate-900">Printing Options</h2>
+        </div>
+
+        <!-- Color Selection -->
+        <div>
+          <label class="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-1.5">Color Mode</label>
+          <div class="grid grid-cols-2 gap-2">
+            <button type="button" onclick="setColorMode('bw')" id="btnBw" class="py-2.5 px-3 rounded-2xl border-2 border-slate-900 bg-slate-900 text-white font-bold text-sm flex items-center justify-center gap-2 transition">
+              <span>⚫</span> Black & White
+            </button>
+            <button type="button" onclick="setColorMode('color')" id="btnColor" class="py-2.5 px-3 rounded-2xl border-2 border-slate-200 bg-white text-slate-700 font-bold text-sm flex items-center justify-center gap-2 transition">
+              <span>🎨</span> Color Print
+            </button>
+          </div>
+        </div>
+
+        <!-- Sidedness (Duplex vs Simplex) -->
+        <div>
+          <label class="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-1.5">Print Sides</label>
+          <div class="grid grid-cols-2 gap-2">
+            <button type="button" onclick="setDuplex(false)" id="btnSimplex" class="py-2.5 px-3 rounded-2xl border-2 border-slate-900 bg-slate-900 text-white font-bold text-sm flex flex-col items-center justify-center transition">
+              <span>Single Sided</span>
+              <span class="text-[10px] font-normal opacity-80">1 side per page</span>
+            </button>
+            <button type="button" onclick="setDuplex(true)" id="btnDuplex" class="py-2.5 px-3 rounded-2xl border-2 border-slate-200 bg-white text-slate-700 font-bold text-sm flex flex-col items-center justify-center transition">
+              <span>Back-to-Back</span>
+              <span class="text-[10px] font-normal opacity-80">Double sided (Save paper)</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Paper Size & Copies -->
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-1.5">Paper Size</label>
+            <select id="selectPaperSize" onchange="recalculatePrice()" class="w-full bg-slate-50 border-2 border-slate-200 rounded-2xl p-2.5 text-sm font-bold text-slate-800">
+              <option value="A4" selected>A4 (Standard)</option>
+              <option value="A3">A3 (Large)</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-1.5">Copies</label>
+            <div class="flex items-center border-2 border-slate-200 rounded-2xl bg-slate-50 overflow-hidden">
+              <button onclick="changeCopies(-1)" class="w-10 py-2 text-slate-600 font-black hover:bg-slate-200 active:bg-slate-300">-</button>
+              <input type="number" id="inputCopies" value="1" min="1" max="50" onchange="recalculatePrice()" class="w-full text-center bg-transparent font-black text-sm">
+              <button onclick="changeCopies(1)" class="w-10 py-2 text-slate-600 font-black hover:bg-slate-200 active:bg-slate-300">+</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- STEP 3: PRICE CALCULATION & BILL -->
+      <section id="billSection" class="hidden bg-slate-900 text-white p-5 rounded-3xl shadow-xl space-y-3">
+        <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+          <span class="text-xs font-bold text-amber-400 uppercase tracking-wider">Order Summary</span>
+          <span id="billBadge" class="text-xs text-slate-400">Calculated</span>
+        </div>
+
+        <div class="space-y-1.5 text-xs text-slate-300">
+          <div class="flex justify-between">
+            <span>Original Pages:</span>
+            <span id="billPages" class="font-bold text-white">5</span>
+          </div>
+          <div class="flex justify-between">
+            <span>Physical Sheets to Print:</span>
+            <span id="billSheets" class="font-bold text-white">3 Sheets</span>
+          </div>
+          <div class="flex justify-between">
+            <span>Print Mode:</span>
+            <span id="billMode" class="font-bold text-white">B&W Back-to-Back</span>
+          </div>
+          <div class="flex justify-between">
+            <span>Copies:</span>
+            <span id="billCopies" class="font-bold text-white">1</span>
+          </div>
+        </div>
+
+        <div class="border-t border-slate-800 pt-3 flex items-center justify-between">
+          <div>
+            <p class="text-xs text-slate-400 uppercase font-semibold">Total Cost</p>
+            <p id="billTotal" class="text-3xl font-black text-amber-400">₹9.00</p>
+          </div>
+          <button onclick="createAndPrintOrder()" id="btnPrintNow" class="px-6 py-3.5 bg-gradient-to-r from-emerald-500 to-green-400 hover:from-emerald-600 hover:to-green-500 text-slate-950 font-black text-sm rounded-2xl shadow-lg shadow-emerald-500/20 active:scale-95 transition flex items-center gap-2">
+            <span>🖨️</span> Print Now
+          </button>
+        </div>
+      </section>
+
+      <!-- STEP 4: LIVE PRINT STATUS -->
+      <section id="statusSection" class="hidden bg-white p-6 rounded-3xl shadow-sm border border-slate-200 text-center space-y-5">
+        <div id="statusIcon" class="w-20 h-20 mx-auto rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-4xl animate-pulse">
+          🖨️
+        </div>
+
+        <div>
+          <span id="statusBadgeTag" class="text-xs font-black uppercase tracking-wider px-3 py-1 bg-blue-100 text-blue-800 rounded-full">Printing</span>
+          <h3 id="statusTitle" class="text-2xl font-black text-slate-900 mt-3">Printing on Canon...</h3>
+          <p id="statusDesc" class="text-sm text-slate-500 mt-1">Your document is being printed by the shop printer.</p>
+        </div>
+
+        <div id="statusSuccessBanner" class="hidden p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-emerald-800 font-bold text-sm">
+          🎉 Printing Finished! Please collect your sheets from the printer tray.
+        </div>
+
+        <button id="btnFinish" onclick="window.location.reload()" class="hidden w-full py-3 bg-slate-900 text-white font-bold rounded-2xl active:scale-95 transition">
+          Print Another Document
+        </button>
+      </section>
+
+    </div>
+  </main>
+
+  <footer class="p-4 text-center text-xs text-slate-400">
+    Aishwarya Xerox • Protected Printing Session
+  </footer>
+
+  <script>
+    const socket = io({
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionDelay: 1000,
+      reconnectionAttempts: Infinity
+    });
+    let currentSessionId = null;
+    let currentFile = null;
+    let currentOrder = null;
+    let selectedColor = 'bw';
+    let selectedDuplex = false;
+
+    // Check / Start Session using Single-Use Token from QR (With Session Continuity)
+    async function attemptStartSession() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const token = urlParams.get('token');
+
+      // Check if returning from PhonePe payment redirect!
+      const paymentReturn = urlParams.get('payment');
+      const orderIdReturn = urlParams.get('orderId');
+      if (paymentReturn === 'completed' && orderIdReturn) {
+        document.getElementById('noticeView').classList.add('hidden');
+        document.getElementById('orderFlowView').classList.remove('hidden');
+        document.getElementById('paymentSection').classList.add('hidden');
+        document.getElementById('statusSection').classList.remove('hidden');
+        listenOrderStatus(orderIdReturn);
+        return;
+      }
+
+      // 1. Session Continuity: Check if user already has an active session
+      const savedSessionId = sessionStorage.getItem('ax_sessionId');
+      if (savedSessionId) {
+        try {
+          const resumeRes = await fetch('/api/session/resume', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sessionId: savedSessionId })
+          });
+          const resumeData = await resumeRes.json();
+          if (resumeData.success) {
+            console.log('[Session] Resumed active session:', savedSessionId);
+            currentSessionId = savedSessionId;
+            socket.emit('session:join', { sessionId: currentSessionId });
+            document.getElementById('noticeView').classList.add('hidden');
+            document.getElementById('orderFlowView').classList.remove('hidden');
+            document.getElementById('sessionTimerBadge').classList.remove('hidden');
+            document.getElementById('btnCancelSession').classList.remove('hidden');
+            startHeartbeat();
+            if (resumeData.status?.remainingSeconds) {
+              const expiresAt = Date.now() + (resumeData.status.remainingSeconds * 1000);
+              startLiveTimer(expiresAt);
+            }
+
+            // Restore File
+            if (resumeData.file) {
+              currentFile = resumeData.file;
+              document.getElementById('dropZone').classList.add('hidden');
+              document.getElementById('fileInfoCard').classList.remove('hidden');
+              document.getElementById('uploadedFileName').textContent = currentFile.fileName;
+              document.getElementById('uploadedFileMeta').textContent = `${currentFile.pageCount} Pages • ${(currentFile.fileSize / 1024 / 1024).toFixed(2)} MB`;
+              document.getElementById('optionsSection').classList.remove('hidden');
+              document.getElementById('billSection').classList.remove('hidden');
+              recalculatePrice();
+            }
+
+            // Restore Order / Status
+            if (resumeData.order) {
+              currentOrder = resumeData.order;
+              if (['QUEUED', 'PRINTING', 'COMPLETED'].includes(currentOrder.status)) {
+                document.getElementById('optionsSection').classList.add('hidden');
+                document.getElementById('billSection').classList.add('hidden');
+                document.getElementById('statusSection').classList.remove('hidden');
+                listenOrderStatus(currentOrder.orderId);
+              }
+            }
+            return;
+          } else {
+            sessionStorage.removeItem('ax_sessionId');
+          }
+        } catch (e) {
+          console.warn('Session resume check error:', e);
+        }
+      }
+
+      // If no token in URL and no active session, prompt user to scan QR
+      if (!token) {
+        showNotice({
+          icon: '📷',
+          title: 'Scan QR to Start',
+          desc: 'Please scan the dynamic QR code displayed on the screen outside Aishwarya Xerox to start printing.',
+          actionText: null
+        });
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/session/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+          currentSessionId = data.sessionId;
+          sessionStorage.setItem('ax_sessionId', currentSessionId);
+          socket.emit('session:join', { sessionId: currentSessionId });
+          document.getElementById('noticeView').classList.add('hidden');
+          document.getElementById('orderFlowView').classList.remove('hidden');
+          document.getElementById('sessionTimerBadge').classList.remove('hidden');
+          document.getElementById('btnCancelSession').classList.remove('hidden');
+          startHeartbeat();
+          startLiveTimer(data.expiresAt);
+        } else {
+          // Token already burned or invalid or kiosk busy
+          if (data.reason === 'TOKEN_ALREADY_USED' || data.reason === 'TOKEN_INVALID') {
+            showNotice({
+              icon: '🚫',
+              title: 'QR Code Expired / Used',
+              desc: 'This single-use QR code has already been completed. For security, each QR code works only once. Please scan the fresh QR code on the outside screen to print another document.',
+              actionText: null
+            });
+            // Clear expired token from address bar so reload won't keep hitting it
+            window.history.replaceState({}, document.title, window.location.pathname);
+          } else {
+            // Kiosk busy
+            showNotice({
+              icon: '⏳',
+              title: 'Kiosk is in Use',
+              desc: 'Another customer is currently printing at Aishwarya Xerox. Please wait ~1-2 minutes for your turn.',
+              actionText: 'Check Again'
+            });
+          }
+        }
+      } catch (err) {
+        console.error('Session start error:', err);
+      }
+    }
+
+    function showNotice({ icon, title, desc, actionText }) {
+      document.getElementById('orderFlowView').classList.add('hidden');
+      const notice = document.getElementById('noticeView');
+      notice.classList.remove('hidden');
+
+      document.getElementById('noticeIcon').textContent = icon;
+      document.getElementById('noticeTitle').textContent = title;
+      document.getElementById('noticeDesc').textContent = desc;
+
+      const action = document.getElementById('noticeAction');
+      if (actionText) {
+        action.classList.remove('hidden');
+        action.querySelector('a').textContent = actionText;
+      } else {
+        action.classList.add('hidden');
+      }
+    }
+
+    let countdownInterval = null;
+    function startLiveTimer(expiresAt) {
+      if (countdownInterval) clearInterval(countdownInterval);
+      countdownInterval = setInterval(() => {
+        const remaining = Math.max(0, Math.floor((expiresAt - Date.now()) / 1000));
+        const m = Math.floor(remaining / 60);
+        const s = remaining % 60;
+        document.getElementById('timerText').textContent = `${m}:${s < 10 ? '0' : ''}${s}`;
+
+        if (remaining <= 0) {
+          clearInterval(countdownInterval);
+          alert('Your 3-minute session has expired. Please scan the QR code again.');
+          window.location.reload();
+        }
+      }, 1000);
+    }
+
+    // Heartbeat every 20s (resilient to mobile network switches)
+    let failedHeartbeats = 0;
+    function startHeartbeat() {
+      setInterval(async () => {
+        if (!currentSessionId) return;
+        try {
+          const res = await fetch('/api/session/heartbeat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sessionId: currentSessionId })
+          });
+          const data = await res.json();
+          if (data && data.success) {
+            failedHeartbeats = 0;
+          } else {
+            failedHeartbeats++;
+            if (failedHeartbeats >= 3) {
+              alert('Your 3-minute session has timed out. Please scan the kiosk QR code again.');
+              window.location.reload();
+            }
+          }
+        } catch (e) {
+          // Temporary network fluctuation on mobile - keep trying
+        }
+      }, 20000);
+    }
+
+    // File selection & upload
+    async function handleFileSelect(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('sessionId', currentSessionId);
+
+      document.getElementById('dropZone').innerHTML = `
+        <div class="animate-spin text-3xl mb-2">⏳</div>
+        <p class="font-bold text-sm text-slate-700">Analyzing document...</p>
+      `;
+
+      try {
+        const res = await fetch('/api/upload', {
+          method: 'POST',
+          body: formData
+        });
+        const data = await res.json();
+
+        if (data.success) {
+          currentFile = data;
+          document.getElementById('dropZone').classList.add('hidden');
+          document.getElementById('fileInfoCard').classList.remove('hidden');
+          document.getElementById('uploadedFileName').textContent = data.fileName;
+          document.getElementById('uploadedFileMeta').textContent = `${data.pageCount} Pages • ${(data.fileSize / 1024 / 1024).toFixed(2)} MB`;
+
+          document.getElementById('optionsSection').classList.remove('hidden');
+          document.getElementById('billSection').classList.remove('hidden');
+          recalculatePrice();
+        } else {
+          alert(data.error || 'Upload failed');
+          resetFile();
+        }
+      } catch (err) {
+        alert('Upload failed: ' + err.message);
+        resetFile();
+      }
+    }
+
+    function resetFile() {
+      currentFile = null;
+      document.getElementById('fileInput').value = '';
+      document.getElementById('fileInfoCard').classList.add('hidden');
+      document.getElementById('dropZone').classList.remove('hidden');
+      document.getElementById('dropZone').innerHTML = `
+        <input type="file" id="fileInput" accept=".pdf,image/*,.doc,.docx" class="hidden" onchange="handleFileSelect(event)">
+        <div class="w-12 h-12 mx-auto rounded-2xl bg-amber-100 text-amber-600 flex items-center justify-center text-2xl mb-2">📄</div>
+        <p class="font-bold text-sm text-slate-800">Tap to Select Document</p>
+        <p class="text-xs text-slate-500 mt-1">From WhatsApp, Files, or Downloads</p>
+      `;
+      document.getElementById('optionsSection').classList.add('hidden');
+      document.getElementById('billSection').classList.add('hidden');
+    }
+
+    // Option toggles
+    function setColorMode(mode) {
+      selectedColor = mode;
+      const btnBw = document.getElementById('btnBw');
+      const btnColor = document.getElementById('btnColor');
+
+      if (mode === 'bw') {
+        btnBw.className = "py-2.5 px-3 rounded-2xl border-2 border-slate-900 bg-slate-900 text-white font-bold text-sm flex items-center justify-center gap-2 transition";
+        btnColor.className = "py-2.5 px-3 rounded-2xl border-2 border-slate-200 bg-white text-slate-700 font-bold text-sm flex items-center justify-center gap-2 transition";
+      } else {
+        btnColor.className = "py-2.5 px-3 rounded-2xl border-2 border-slate-900 bg-slate-900 text-white font-bold text-sm flex items-center justify-center gap-2 transition";
+        btnBw.className = "py-2.5 px-3 rounded-2xl border-2 border-slate-200 bg-white text-slate-700 font-bold text-sm flex items-center justify-center gap-2 transition";
+      }
+      recalculatePrice();
+    }
+
+    function setDuplex(isDuplex) {
+      selectedDuplex = isDuplex;
+      const btnSimplex = document.getElementById('btnSimplex');
+      const btnDuplex = document.getElementById('btnDuplex');
+
+      if (!isDuplex) {
+        btnSimplex.className = "py-2.5 px-3 rounded-2xl border-2 border-slate-900 bg-slate-900 text-white font-bold text-sm flex flex-col items-center justify-center transition";
+        btnDuplex.className = "py-2.5 px-3 rounded-2xl border-2 border-slate-200 bg-white text-slate-700 font-bold text-sm flex flex-col items-center justify-center transition";
+      } else {
+        btnDuplex.className = "py-2.5 px-3 rounded-2xl border-2 border-slate-900 bg-slate-900 text-white font-bold text-sm flex flex-col items-center justify-center transition";
+        btnSimplex.className = "py-2.5 px-3 rounded-2xl border-2 border-slate-200 bg-white text-slate-700 font-bold text-sm flex flex-col items-center justify-center transition";
+      }
+      recalculatePrice();
+    }
+
+    function changeCopies(delta) {
+      const input = document.getElementById('inputCopies');
+      let val = Math.max(1, (parseInt(input.value, 10) || 1) + delta);
+      input.value = val;
+      recalculatePrice();
+    }
+
+    // Recalculate bill
+    async function recalculatePrice() {
+      if (!currentFile) return;
+
+      const copies = parseInt(document.getElementById('inputCopies').value, 10) || 1;
+      const paperSize = document.getElementById('selectPaperSize').value;
+
+      try {
+        const res = await fetch('/api/calculate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            pageCount: currentFile.pageCount,
+            colorMode: selectedColor,
+            isDuplex: selectedDuplex,
+            paperSize,
+            copies
+          })
+        });
+        const data = await res.json();
+        if (data.success) {
+          const b = data.breakdown;
+          document.getElementById('billPages').textContent = b.pages;
+          document.getElementById('billSheets').textContent = `${b.totalSheets} Sheets`;
+          document.getElementById('billMode').textContent = `${selectedColor === 'bw' ? 'B&W' : 'Color'} ${selectedDuplex ? 'Back-to-Back' : 'Single Sided'}`;
+          document.getElementById('billCopies').textContent = b.copies;
+          document.getElementById('billTotal').textContent = `₹${b.totalAmount.toFixed(2)}`;
+        }
+      } catch (err) {
+        console.error('Calculation error:', err);
+      }
+    }
+
+    // Step 3: Direct 1-Click Print Order (Payment gateway bypassed for trial testing)
+    async function createAndPrintOrder() {
+      if (!currentFile || !currentSessionId) return;
+
+      const copies = parseInt(document.getElementById('inputCopies').value, 10) || 1;
+      const paperSize = document.getElementById('selectPaperSize').value;
+      const btn = document.getElementById('btnPrintNow');
+      const originalText = btn.innerHTML;
+      btn.innerHTML = `<span class="animate-spin">⏳</span> Sending to Canon...`;
+      btn.disabled = true;
+
+      try {
+        // 1. Create Order
+        const res = await fetch('/api/order/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: currentSessionId,
+            fileId: currentFile.fileId,
+            options: {
+              colorMode: selectedColor,
+              isDuplex: selectedDuplex,
+              paperSize,
+              copies
+            }
+          })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+          currentOrder = data.order;
+          
+          // 2. Immediately trigger print dispatch
+          const payRes = await fetch('/api/order/pay', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              orderId: currentOrder.orderId,
+              isTestPay: true
+            })
+          });
+          const payData = await payRes.json();
+
+          if (payData.success) {
+            // Show live printing tracker immediately!
+            document.getElementById('optionsSection').classList.add('hidden');
+            document.getElementById('billSection').classList.add('hidden');
+            document.getElementById('statusSection').classList.remove('hidden');
+            listenOrderStatus(currentOrder.orderId);
+          } else {
+            alert('Print dispatch error: ' + (payData.error || 'Failed to dispatch print'));
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+          }
+        } else {
+          alert(data.error || 'Failed to create order');
+          btn.innerHTML = originalText;
+          btn.disabled = false;
+        }
+      } catch (err) {
+        alert('Order error: ' + err.message);
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+      }
+    }
+
+    // Listen to real-time status of order
+    function listenOrderStatus(orderId) {
+      socket.on(`order:${orderId}:update`, (update) => {
+        document.getElementById('statusSection').classList.remove('hidden');
+
+        const title = document.getElementById('statusTitle');
+        const desc = document.getElementById('statusDesc');
+        const tag = document.getElementById('statusBadgeTag');
+        const banner = document.getElementById('statusSuccessBanner');
+        const btnFinish = document.getElementById('btnFinish');
+
+        if (update.status === 'QUEUED') {
+          tag.textContent = 'Queued';
+          title.textContent = 'Order Queued';
+          desc.textContent = 'Connecting to Canon multifunction printer...';
+        } else if (update.status === 'PRINTING') {
+          tag.textContent = 'Printing';
+          title.textContent = 'Printing In Progress...';
+          desc.textContent = 'Sheets are feeding through the Canon printer tray.';
+        } else if (update.status === 'COMPLETED') {
+          tag.textContent = 'Completed';
+          tag.className = 'text-xs font-black uppercase tracking-wider px-3 py-1 bg-emerald-100 text-emerald-800 rounded-full';
+          title.textContent = 'All Pages Printed!';
+          desc.textContent = `Order ${orderId} has been printed successfully.`;
+          banner.classList.remove('hidden');
+          btnFinish.classList.remove('hidden');
+
+          // Strip the single-use token from the URL bar immediately!
+          // This prevents reload loops from ever re-locking the kiosk
+          window.history.replaceState({}, document.title, window.location.pathname);
+          sessionStorage.removeItem('ax_sessionId');
+          currentSessionId = null;
+        }
+      });
+    }
+
+    // Explicit Cancel button (releases kiosk when user taps Cancel)
+    async function cancelSessionPrompt() {
+      if (!confirm('Do you want to cancel and leave? This will unlock the outside kiosk for the next customer.')) return;
+      if (currentSessionId) {
+        try {
+          await fetch('/api/session/cancel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sessionId: currentSessionId })
+          });
+        } catch (e) {}
+      }
+      sessionStorage.removeItem('ax_sessionId');
+      currentSessionId = null;
+      window.history.replaceState({}, document.title, window.location.pathname);
+      window.location.reload();
+    }
+
+    // Start on boot
+    attemptStartSession();
+  </script>
+</body>
+</html>
+
