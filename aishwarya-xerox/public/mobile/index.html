@@ -256,8 +256,14 @@
             <p class="text-xs text-slate-400 uppercase font-semibold">Total Cost</p>
             <p id="billTotal" class="text-3xl font-black text-amber-400">₹9.00</p>
           </div>
-          <button onclick="proceedToPayment()" id="btnProceedPay" class="px-6 py-3.5 bg-gradient-to-r from-amber-400 to-yellow-300 hover:from-amber-500 hover:to-yellow-400 text-slate-950 font-black text-sm rounded-2xl shadow-lg shadow-amber-400/20 active:scale-95 transition flex items-center gap-2">
-            <span>Proceed to Pay</span> ➔
+          <button onclick="proceedToPayment()" id="btnProceedPay" class="px-6 py-3.5 bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-700 hover:from-purple-700 hover:to-indigo-700 text-white font-black text-sm rounded-2xl shadow-lg shadow-purple-600/30 active:scale-95 transition flex items-center gap-2">
+            <span>Pay with PhonePe</span> ➔
+          </button>
+        </div>
+        <!-- Trial Mode Quick Test Print -->
+        <div class="pt-2 text-right">
+          <button type="button" onclick="triggerTestPayDirect()" class="text-[11px] font-semibold text-emerald-400 hover:text-emerald-300 active:opacity-75">
+            ⚡ Shop Owner Test Print (Without Money)
           </button>
         </div>
       </section>
@@ -1005,7 +1011,7 @@
       qrTimerInterval = setInterval(updateTimers, 1000);
     }
 
-    // Step 3: Transition to Payment Screen
+    // Step 3: Transition to PhonePe Payment Screen
     async function proceedToPayment() {
       if (!currentFile || !currentSessionId) return;
 
@@ -1013,10 +1019,11 @@
       const paperSize = document.getElementById('selectPaperSize').value;
       const btn = document.getElementById('btnProceedPay');
       const originalText = btn.innerHTML;
-      btn.innerHTML = `<span class="animate-spin">⏳</span> Generating Bill...`;
+      btn.innerHTML = `<span class="animate-spin">⏳</span> Connecting PhonePe...`;
       btn.disabled = true;
 
       try {
+        // 1. Create Order
         const res = await fetch('/api/order/create', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1033,43 +1040,80 @@
         });
         const data = await res.json();
 
-        if (data.success && data.order) {
-          currentOrder = data.order;
-
-          // Populate Payment UI
-          document.getElementById('payOrderId').textContent = currentOrder.orderId;
-          document.getElementById('payAmount').textContent = `₹${currentOrder.amount.toFixed(2)}`;
-          document.getElementById('payQrCodeImg').src = currentOrder.upiQrDataUrl;
-
-          if (currentOrder.breakdown) {
-            const b = currentOrder.breakdown;
-            document.getElementById('payPages').textContent = `${b.pages} Pages`;
-            document.getElementById('paySheets').textContent = `${b.totalSheets} Sheets`;
-            document.getElementById('payMode').textContent = `${selectedColor === 'bw' ? 'B&W' : 'Color'} ${selectedDuplex ? 'Duplex' : 'Single'}`;
-            document.getElementById('payCopies').textContent = b.copies;
-          }
-
-          // Start live PhonePe countdown timers
-          startPaymentTimers();
-
-          // Switch View to Payment
-          document.getElementById('optionsSection').classList.add('hidden');
-          document.getElementById('billSection').classList.add('hidden');
-          document.getElementById('paymentSection').classList.remove('hidden');
-
-          // Push browser history state for smooth back button
-          window.history.pushState({ step: 'payment', orderId: currentOrder.orderId }, '');
-
-          // Listen for background webhook updates
-          listenOrderStatus(currentOrder.orderId);
-        } else {
+        if (!data.success || !data.order) {
           alert(data.error || 'Failed to create order');
+          btn.innerHTML = originalText;
+          btn.disabled = false;
+          return;
+        }
+
+        currentOrder = data.order;
+
+        // 2. Automatically initiate PhonePe Standard Checkout
+        const payRes = await fetch('/api/payment/phonepe/initiate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            orderId: currentOrder.orderId,
+            mobileNumber: '9701801308'
+          })
+        });
+        const payData = await payRes.json();
+        console.log('[PhonePe Response]', payData);
+
+        if (payData.success && payData.redirectUrl) {
+          btn.innerHTML = `<span>🚀</span> Opening PhonePe...`;
+          sessionStorage.setItem('ax_orderId', currentOrder.orderId);
+          // Redirect directly to official PhonePe Checkout page
+          // This avoids mobile iframe blocks and fake VPA errors!
+          window.location.href = payData.redirectUrl;
+          return;
+        } else {
+          alert('PhonePe Gateway Error: ' + (payData.error || 'Could not initiate payment.'));
+          btn.innerHTML = originalText;
+          btn.disabled = false;
         }
       } catch (err) {
-        alert('Order creation failed: ' + err.message);
-      } finally {
+        alert('Payment initiation failed: ' + err.message);
         btn.innerHTML = originalText;
         btn.disabled = false;
+      }
+    }
+
+    // Direct Test Print for Shop Owner (Trial Mode)
+    async function triggerTestPayDirect() {
+      if (!currentFile || !currentSessionId) return;
+      const copies = parseInt(document.getElementById('inputCopies').value, 10) || 1;
+      const paperSize = document.getElementById('selectPaperSize').value;
+
+      try {
+        const res = await fetch('/api/order/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: currentSessionId,
+            fileId: currentFile.fileId,
+            options: { colorMode: selectedColor, isDuplex: selectedDuplex, paperSize, copies }
+          })
+        });
+        const data = await res.json();
+        if (data.success && data.order) {
+          currentOrder = data.order;
+          const payRes = await fetch('/api/order/pay', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ orderId: currentOrder.orderId, isTestPay: true })
+          });
+          const payData = await payRes.json();
+          if (payData.success) {
+            document.getElementById('optionsSection').classList.add('hidden');
+            document.getElementById('billSection').classList.add('hidden');
+            document.getElementById('statusSection').classList.remove('hidden');
+            listenOrderStatus(currentOrder.orderId);
+          }
+        }
+      } catch (e) {
+        alert('Test print error: ' + e.message);
       }
     }
 

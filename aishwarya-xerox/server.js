@@ -588,8 +588,32 @@ app.post('/api/payment/phonepe/webhook', async (req, res) => {
 });
 
 // 3. Customer Return Redirect (When customer finishes payment on PhonePe page)
-app.all('/api/payment/phonepe/redirect', (req, res) => {
+app.all('/api/payment/phonepe/redirect', async (req, res) => {
   const orderId = req.query.orderId || req.body?.merchantTransactionId;
+  console.log(`[PhonePe Redirect] Customer returned for Order ${orderId}`);
+
+  const order = orders.get(orderId);
+  if (order && order.status === 'AWAITING_PAYMENT') {
+    try {
+      const statusCheck = await phonePeService.checkPaymentStatus(orderId);
+      console.log(`[PhonePe Redirect Check] Order ${orderId} Status:`, statusCheck);
+
+      if (statusCheck && statusCheck.isSuccess) {
+        console.log(`[PhonePe Redirect] Payment confirmed SUCCESS! Dispatching print job...`);
+        order.status = 'QUEUED';
+        order.paidAt = new Date().toISOString();
+        order.transactionRef = `PHONEPE-${statusCheck.transactionId || Date.now()}`;
+
+        sessionManager.setPrinting(orderId);
+        io.emit(`order:${orderId}:update`, { status: 'QUEUED', orderId });
+        io.emit('admin:order_update', order);
+        dispatchPrintJob(order);
+      }
+    } catch (err) {
+      console.warn(`[PhonePe Redirect Verification Warning]`, err.message);
+    }
+  }
+
   res.redirect(`/mobile?orderId=${orderId || ''}&payment=completed`);
 });
 
